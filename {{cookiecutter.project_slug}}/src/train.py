@@ -6,6 +6,12 @@ import torch.nn as nn
 import wandb
 from tqdm import tqdm
 
+
+class _NoOpRun:
+    """Stands in for a wandb run when W&B is not configured."""
+    def log(self, *args, **kwargs): pass
+    def finish(self): pass
+
 from src.datasets import TemplateDataset, get_dataloaders, split_dataset
 from src.eval import evaluate
 from src.models import TemplateModel
@@ -70,11 +76,15 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=t_cfg["learning_rate"])
     criterion = nn.CrossEntropyLoss()
 
-    wandb.init(
-        project=config.get("wandb_project", "ml_project"),
-        config=config,
-        group=config.get("wandb_group"),
-    )
+    wandb_project = t_cfg.get("wandb_project") or config.get("wandb_project")
+    if wandb_project:
+        run = wandb.init(
+            project=wandb_project,
+            config=config,
+            group=config.get("wandb_group"),
+        )
+    else:
+        run = _NoOpRun()
 
     history: list[dict] = []
     try:
@@ -82,7 +92,7 @@ def train(
             train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
             val_metrics = evaluate(model, val_loader, criterion, device)
 
-            wandb.log(
+            run.log(
                 {"epoch": epoch, "train_loss": train_loss, **{f"val_{k}": v for k, v in val_metrics.items()}},
                 step=epoch,
             )
@@ -93,7 +103,7 @@ def train(
             for cb in callbacks:
                 cb(epoch, train_loss, val_metrics, model)
     finally:
-        wandb.finish()
+        run.finish()
 
     return model, history
 

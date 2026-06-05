@@ -4,6 +4,8 @@ num_epochs = 10
 learning_rate = 1e-3
 checkpoint_every_n_epochs = 2
 log_directory = "logs"
+# Uncomment to enable Weights & Biases logging:
+# wandb_project = "{{ cookiecutter.project_slug }}_experiments"
 
 [model]
 input_size = 128
