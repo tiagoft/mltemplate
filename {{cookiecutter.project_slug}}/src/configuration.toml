@@ -1,0 +1,18 @@
+[training]
+batch_size = 32
+num_epochs = 10
+learning_rate = 1e-3
+checkpoint_every_n_epochs = 2
+log_directory = "logs"
+
+[model]
+input_size = 128
+hidden_sizes = [256, 128]
+output_size = 10
+dropout = 0.2
+
+[data]
+# train_ratio + val_ratio + test_ratio must sum to 1.0
+train_ratio = 0.7
+val_ratio = 0.15
+test_ratio = 0.15
