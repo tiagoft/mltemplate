@@ -1,0 +1,8 @@
+[project]
+name = "mltemplate"
+version = "0.1.0"
+description = "Cookiecutter template for PyTorch ML projects"
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = ["cookiecutter>=2.6"]
