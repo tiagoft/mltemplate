@@ -37,7 +37,10 @@ def train_epoch(
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         outputs = model(inputs)
-        loss = criterion(outputs, targets)
+        if hasattr(model, "loss"):
+            loss = model.loss(inputs, outputs, targets)
+        else:
+            loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()

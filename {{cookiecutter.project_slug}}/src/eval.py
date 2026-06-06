@@ -17,7 +17,10 @@ def evaluate(
         for inputs, targets in dataloader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            if hasattr(model, "loss"):
+                loss = model.loss(inputs, outputs, targets)
+            else:
+                loss = criterion(outputs, targets)
             total_loss += loss.item()
             n_batches += 1
     return {"loss": total_loss / n_batches if n_batches > 0 else float("nan")}
