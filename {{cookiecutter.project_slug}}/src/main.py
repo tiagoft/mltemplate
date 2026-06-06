@@ -25,26 +25,19 @@ def _load_config(config_file: Path) -> dict:
         return tomllib.load(f)
 
 
-@app.command()
-def train(
-    config_file: Annotated[Path, typer.Option(help="Path to configuration.toml")] = _DEFAULT_CONFIG,
-) -> None:
-    """Train the model and save checkpoints + metrics to a timestamped run directory."""
-    config = _load_config(config_file)
-    t_cfg = config["training"]
+def _merge_config(base: dict, override: dict) -> dict:
+    """Apply a partial override onto base. Dicts are merged one level deep."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    return merged
 
-    run_dir = (
-        Path(t_cfg["log_directory"])
-        / _LOG_SUBDIR
-        / datetime.now().strftime("%Y%m%d_%H%M%S")
-    )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"Run directory: [bold]{run_dir}[/bold]")
 
-    (run_dir / "config.json").write_text(json.dumps(config, indent=2))
-
+def _make_callbacks(run_dir: Path, checkpoint_every: int):
     metrics_path = run_dir / "metrics.jsonl"
-    checkpoint_every = t_cfg["checkpoint_every_n_epochs"]
 
     def metrics_callback(epoch: int, train_loss: float, val_metrics: dict, model) -> None:
         record = {
@@ -63,7 +56,28 @@ def train(
             torch.save(model.state_dict(), path)
             console.print(f"  Saved checkpoint: {path.name}")
 
-    train_model(config, callbacks=[metrics_callback, checkpoint_callback])
+    return [metrics_callback, checkpoint_callback]
+
+
+@app.command()
+def train(
+    config_file: Annotated[Path, typer.Option(help="Path to configuration.toml")] = _DEFAULT_CONFIG,
+) -> None:
+    """Train the model and save checkpoints + metrics to a timestamped run directory."""
+    config = _load_config(config_file)
+    t_cfg = config["training"]
+
+    run_dir = (
+        Path(t_cfg["log_directory"])
+        / _LOG_SUBDIR
+        / datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    console.print(f"Run directory: [bold]{run_dir}[/bold]")
+
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2))
+
+    train_model(config, callbacks=_make_callbacks(run_dir, t_cfg["checkpoint_every_n_epochs"]))
     console.print("[green]Training complete.[/green]")
 
 
@@ -86,8 +100,8 @@ def viewer(
         table.add_column("Epochs", justify="right")
         table.add_column("Final val_loss", justify="right")
 
-        for metrics_file in sorted(log_dir.glob("*/metrics.jsonl")):
-            run_name = metrics_file.parent.name
+        for metrics_file in sorted(log_dir.rglob("metrics.jsonl")):
+            run_name = str(metrics_file.parent.relative_to(log_dir))
             lines = metrics_file.read_text().strip().splitlines()
             if not lines:
                 table.add_row(run_name, "0", "—")
@@ -127,6 +141,54 @@ def viewer(
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     console.print(f"Saved: [bold]{out_path}[/bold]")
+
+
+@app.command()
+def sweep(
+    config_file: Annotated[Path, typer.Option(help="Path to configuration.toml")] = _DEFAULT_CONFIG,
+) -> None:
+    """Train all sweep variants defined in configuration.toml [sweep.variants]."""
+    config = _load_config(config_file)
+    variants = config.get("sweep", {}).get("variants", [])
+    if not variants:
+        console.print("[red]No [sweep] variants defined in configuration.toml.[/red]")
+        console.print("Add a [sweep] section — see the comments at the bottom of the file.")
+        raise typer.Exit(1)
+
+    sweep_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sweep_group = f"sweep_{sweep_ts}"
+    sweep_dir = Path(config["training"]["log_directory"]) / _LOG_SUBDIR / sweep_group
+    console.print(f"Sweep directory: [bold]{sweep_dir}[/bold]  ({len(variants)} variants)\n")
+
+    results = []
+    for i, variant in enumerate(variants):
+        merged = _merge_config(config, variant)
+        merged["wandb_group"] = sweep_group
+
+        run_dir = sweep_dir / f"v{i:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "config.json").write_text(json.dumps(merged, indent=2))
+
+        m = merged["model"]
+        label = f"{m.get('type', 'mlp')} {m.get('hidden_sizes') or m.get('channels', '')}"
+        console.print(f"[bold cyan]Variant v{i:02d}[/bold cyan]: {label}")
+
+        model, history = train_model(
+            merged,
+            callbacks=_make_callbacks(run_dir, merged["training"]["checkpoint_every_n_epochs"]),
+        )
+        results.append((label, history))
+        console.print()
+
+    table = Table(title=f"Sweep results: {sweep_group}")
+    table.add_column("Variant", style="cyan")
+    table.add_column("Model", style="magenta")
+    table.add_column("Final val_loss", justify="right")
+    for i, (label, history) in enumerate(results):
+        val_loss = history[-1].get("val_loss", float("nan"))
+        table.add_row(f"v{i:02d}", label, f"{val_loss:.4f}")
+    console.print(table)
+    console.print(f"\nView curves: [bold]{sweep_group}/v<N>/[/bold] or run [bold]viewer --list[/bold]")
 
 
 @app.command()

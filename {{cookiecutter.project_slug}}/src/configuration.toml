@@ -19,3 +19,15 @@ dropout = 0.2
 train_ratio = 0.7
 val_ratio = 0.15
 test_ratio = 0.15
+
+# [sweep]
+# Each variant is a partial override applied on top of the sections above.
+# Only specify what changes — everything else inherits from the base config.
+# Run with: <project_slug> sweep
+#
+# variants = [
+#     {model = {hidden_sizes = [128]}},
+#     {model = {hidden_sizes = [256, 128]}},
+#     {model = {type = "cnn", channels = [16, 32]}},
+#     {model = {type = "cnn", channels = [32, 64]}},
+# ]
