@@ -15,13 +15,13 @@ uv tool install cookiecutter
 **Generate a new project:**
 
 ```bash
-cookiecutter https://github.com/your-org/mltemplate
+cookiecutter https://github.com/tiagoft/mltemplate
 ```
 
 Or, from a local clone:
 
 ```bash
-git clone https://github.com/your-org/mltemplate
+git clone https://github.com/tiagoft/mltemplate
 cookiecutter mltemplate/
 ```
 
