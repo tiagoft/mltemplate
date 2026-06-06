@@ -1,16 +1,21 @@
 [training]
-batch_size = 8
+batch_size = 8        # keep small — each document runs BERT max_chunks times
 num_epochs = 3
-learning_rate = 2e-5
+learning_rate = 2e-5  # standard BERT fine-tuning range; higher values degrade BERT weights
 checkpoint_every_n_epochs = 1
 log_directory = "logs"
 
 [[model]]
 type = "bert_chunks"
+# Must match [[dataset]].bert_model_name so BERT weights and tokenizer vocabulary align.
 bert_model_name = "bert-base-uncased"
+# Number of chunk positions the chunk-level Transformer can attend over.
+# Must match [[dataset]].max_chunks — the dataset pads/trims every document to exactly this many chunks.
 max_chunks = 4
+# Hidden size for the chunk-level Transformer. bert-base-uncased has hidden_size=768;
+# if d_model differs, a linear projection is inserted automatically.
 d_model = 768
-nhead = 8
+nhead = 8      # attention heads for the chunk-level Transformer (must divide d_model)
 num_layers = 2
 num_classes = 2
 dropout = 0.1
@@ -18,7 +23,14 @@ dropout = 0.1
 [[dataset]]
 name = "imdb_chunks"
 type = "bert_chunks_imdb"
+# Must match [[model]].bert_model_name — tokenizer and model must share the same vocabulary.
 bert_model_name = "bert-base-uncased"
+# Tokens per chunk. Must be ≤ 512 (BERT's hard limit). The dataset slices token sequences
+# into windows of this size; the model reads chunk length dynamically from the input shape.
 chunk_size = 128
+# Tokens shared between consecutive chunk windows (stride = chunk_size - chunk_overlap).
+# Set to 0 for non-overlapping chunks. Must be < chunk_size.
 chunk_overlap = 32
+# Maximum number of chunks kept per document.
+# Must match [[model]].max_chunks — documents are padded or truncated to exactly this count.
 max_chunks = 4
