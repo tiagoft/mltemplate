@@ -272,60 +272,73 @@ print(f"Predicted: {logits.argmax().item()}")  # → 9
 
 ## Sweep
 
-`sweep()` in `src/train.py` accepts a list of config dicts and trains one model per config, returning `(config, model, history)` for each. All runs share a W&B group (if W&B is enabled) for side-by-side comparison.
+Configure variants directly in `src/configuration.toml`. Each variant is a **partial override** — only specify what changes; everything else inherits from the base config above.
 
-Create a `sweep_script.py` in your project root:
-
-```python
-# sweep_script.py
-import tomllib
-from src.train import sweep
-
-with open("src/configuration.toml", "rb") as f:
-    base = tomllib.load(f)
-
-configs = [
-    # Small MLP
-    {**base, "model": {
-        "type": "mlp", "input_size": 784,
-        "hidden_sizes": [128], "output_size": 10, "dropout": 0.1,
-    }},
-    # Large MLP
-    {**base, "model": {
-        "type": "mlp", "input_size": 784,
-        "hidden_sizes": [256, 128], "output_size": 10, "dropout": 0.2,
-    }},
-    # Small CNN  (expects input shape (B, 1, 28, 28) — see note below)
-    {**base, "model": {
-        "type": "cnn", "channels": [16, 32], "output_size": 10, "dropout": 0.1,
-    }},
-    # Large CNN
-    {**base, "model": {
-        "type": "cnn", "channels": [32, 64], "output_size": 10, "dropout": 0.2,
-    }},
+```toml
+[sweep]
+variants = [
+    {model = {hidden_sizes = [128]}},
+    {model = {hidden_sizes = [256, 128]}},
+    {model = {type = "cnn", channels = [16, 32]}},
+    {model = {type = "cnn", channels = [32, 64]}},
 ]
-
-results = sweep(configs)
-
-print(f"\n{'Model':<45} {'Final val_loss':>14}")
-print("-" * 60)
-for config, model, history in results:
-    m = config["model"]
-    label = f"{m['type']} {m.get('hidden_sizes') or m.get('channels')}"
-    print(f"{label:<45} {history[-1]['val_loss']:>14.4f}")
 ```
 
-Run it:
+Then run:
+
 ```bash
-python sweep_script.py
+mnist_classifier sweep
 ```
+
+```text
+Sweep directory: logs/mnist_classifier_log/sweep_20240601_150312  (4 variants)
+
+Variant v00: mlp [128]
+Epochs: 100%|████████| 10/10 ...
+
+Variant v01: mlp [256, 128]
+Epochs: 100%|████████| 10/10 ...
+
+Variant v02: cnn [16, 32]
+Epochs: 100%|████████| 10/10 ...
+
+Variant v03: cnn [32, 64]
+Epochs: 100%|████████| 10/10 ...
+
+         Sweep results: sweep_20240601_150312
+┏━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
+┃ Variant ┃ Model          ┃ Final val_loss ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
+│ v00     │ mlp [128]      │         0.3821 │
+│ v01     │ mlp [256, 128] │         0.3104 │
+│ v02     │ cnn [16, 32]   │         0.1892 │
+│ v03     │ cnn [32, 64]   │         0.1543 │
+└─────────┴────────────────┴────────────────┘
 ```
-Model                                         Final val_loss
-------------------------------------------------------------
-mlp [128]                                             0.3821
-mlp [256, 128]                                        0.3104
-cnn [16, 32]                                          0.1892
-cnn [32, 64]                                          0.1543
+
+Each variant saves its own checkpoints and `metrics.jsonl` under `sweep_<timestamp>/v0N/`. List them all:
+
+```bash
+mnist_classifier viewer --list
+```
+
+```text
+           Runs in logs/mnist_classifier_log
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━┓
+┃ Run                                  ┃ Epochs ┃ Final val_loss ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━┩
+│ 20240601_143022                      │     10 │         2.3021 │
+│ sweep_20240601_150312/v00            │     10 │         0.3821 │
+│ sweep_20240601_150312/v01            │     10 │         0.3104 │
+│ sweep_20240601_150312/v02            │     10 │         0.1892 │
+│ sweep_20240601_150312/v03            │     10 │         0.1543 │
+└──────────────────────────────────────┴────────┴────────────────┘
+```
+
+Plot any individual variant's curve:
+
+```bash
+mnist_classifier viewer logs/mnist_classifier_log/sweep_20240601_150312/v03/
 ```
 
 > **Note for CNN input shape:** `SimpleCNN` expects `(B, 1, H, W)` tensors.
@@ -334,7 +347,7 @@ cnn [32, 64]                                          0.1543
 > transform = transforms.ToTensor()  # keeps (1, 28, 28) shape
 > ```
 
-For richer visualization (per-epoch loss curves, side-by-side comparison across all runs), enable Weights & Biases — see the next section. The sweep function automatically groups all runs under a shared W&B group.
+For richer visualization (per-epoch curves, side-by-side across runs), enable Weights & Biases — see the next section. The sweep command automatically groups all variants under a shared W&B group.
 
 ---
 
