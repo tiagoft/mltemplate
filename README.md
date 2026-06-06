@@ -117,6 +117,49 @@ mnist_classifier viewer --list
 
 ---
 
+## Customize with an LLM
+
+Every generated project includes `AGENTS.md` — a machine-readable guide that describes the exact files, interfaces, and contracts an LLM needs to extend the project correctly.
+
+**With Claude Code** (auto-loads `AGENTS.md` from the project root):
+
+```bash
+cd mnist_classifier
+claude
+```
+
+Then describe what you want in plain language:
+
+```text
+Make the model a Variational AutoEncoder that operates on MNIST.
+```
+
+**With any other LLM** (ChatGPT, Gemini, Copilot Chat, etc.) — paste `AGENTS.md` first:
+
+```text
+<paste the contents of AGENTS.md here>
+
+Now make the model a VAE trained on MNIST.
+```
+
+**Example prompts that work well:**
+
+```text
+Replace the dataset with CIFAR-10 images and update the model for 10-class classification.
+```
+
+```text
+Add a ResNet-18 classifier. Use torchvision.models.resnet18 as the backbone.
+```
+
+```text
+Add a sweep over learning rates: 1e-4, 1e-3, 1e-2.
+```
+
+The LLM will make the minimum set of changes needed — typically 3–5 targeted edits across `datasets.py`, `models.py`, `train.py`, and `configuration.toml`. Everything else (training loop, CLI, checkpointing, sweep logic) stays untouched.
+
+---
+
 ## Change dataset and models: MNIST 1-layer classifier
 
 This section walks through replacing the placeholder code with a real task: classifying handwritten digits with a single linear layer, end to end.
