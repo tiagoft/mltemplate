@@ -34,7 +34,6 @@ class ChunkBERTClassifier(nn.Module):
         self,
         bert_model_name: str,
         max_chunks: int,
-        chunk_size: int,
         d_model: int,
         nhead: int,
         num_layers: int,

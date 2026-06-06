@@ -65,7 +65,6 @@ log_directory = "logs"
 type = "bert_chunks"
 bert_model_name = "bert-base-uncased"
 max_chunks = 4              # Transformer sequence length (positions for chunk-level PE)
-chunk_size = 128            # tokens per chunk (≤ 512)
 d_model = 768               # must match bert hidden_size unless projection is used
 nhead = 8                   # attention heads for chunk-level Transformer
 num_layers = 2

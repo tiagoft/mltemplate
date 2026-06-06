@@ -9,7 +9,6 @@ log_directory = "logs"
 type = "bert_chunks"
 bert_model_name = "bert-base-uncased"
 max_chunks = 4
-chunk_size = 128
 d_model = 768
 nhead = 8
 num_layers = 2
