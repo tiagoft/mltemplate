@@ -125,3 +125,64 @@ max_seq_len = 128
 ```bash
 my_project sweep
 ```
+
+**Switch to RoBERTa:**
+
+RoBERTa uses byte-pair encoding and was not trained with the Next Sentence Prediction objective, so its `pooler_output` is not meaningful for classification. Always use `last_hidden_state[:, 0, :]` (the `<s>` token, RoBERTa's equivalent of CLS). Our code already does this, so only the model class and name change.
+
+In `src/models.py`, replace the import and instantiation inside `__init__`:
+
+```python
+from transformers import RobertaModel          # was: BertModel
+self.bert = RobertaModel.from_pretrained(bert_model_name)
+```
+
+`forward()` is unchanged — `last_hidden_state[:, 0, :]` extracts the same position.
+
+In `configuration.toml`, update both sections to the same model name:
+
+```toml
+[[model]]
+type = "bert"
+bert_model_name = "roberta-base"   # or "roberta-large"
+
+[[dataset]]
+name = "imdb"
+type = "bert_imdb"
+bert_model_name = "roberta-base"
+max_seq_len = 128
+```
+
+`AutoTokenizer` handles RoBERTa's tokenizer automatically — no dataset changes needed.
+
+**Switch to Sentence-BERT (sBERT):**
+
+sBERT models are trained to produce semantically meaningful sentence embeddings via mean pooling over all token representations (weighted by the attention mask), rather than relying on the CLS token. The pretrained weights are available on HuggingFace under the `sentence-transformers` namespace.
+
+In `src/models.py`, replace the `forward` method:
+
+```python
+def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    out = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+    # Attention-mask-weighted mean pool
+    token_emb = out.last_hidden_state                                   # (B, L, hidden)
+    mask = attention_mask.unsqueeze(-1).float()                         # (B, L, 1)
+    pooled = (token_emb * mask).sum(1) / mask.sum(1).clamp(min=1e-9)   # (B, hidden)
+    return self.classifier(self.dropout(pooled))
+```
+
+In `configuration.toml`, use an sBERT model name. Note that these models typically have a smaller hidden size than `bert-base` (e.g. `all-MiniLM-L6-v2` has `hidden_size=384`), so `d_model` should be updated accordingly if you carry the hidden size anywhere:
+
+```toml
+[[model]]
+type = "bert"
+bert_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+num_classes = 2
+dropout = 0.1
+
+[[dataset]]
+name = "imdb"
+type = "bert_imdb"
+bert_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+max_seq_len = 128
+```
