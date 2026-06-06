@@ -12,7 +12,7 @@ class _NoOpRun:
     def log(self, *args, **kwargs): pass
     def finish(self): pass
 
-from src.datasets import TemplateDataset, get_dataloaders, split_dataset
+from src.datasets import get_dataset, get_dataloaders
 from src.eval import evaluate
 from src.models import SimpleCNN, TemplateModel
 
@@ -33,10 +33,14 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     n_batches = 0
-    for inputs, targets in tqdm(dataloader, desc="Batches", leave=False):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch in tqdm(dataloader, desc="Batches", leave=False):
+        if isinstance(batch[0], dict):
+            inputs = {k: v.to(device) for k, v in batch[0].items()}
+        else:
+            inputs = batch[0].to(device)
+        targets = batch[1].to(device)
         optimizer.zero_grad()
-        outputs = model(inputs)
+        outputs = model(**inputs) if isinstance(inputs, dict) else model(inputs)
         if hasattr(model, "loss"):
             loss = model.loss(inputs, outputs, targets)
         else:
@@ -62,20 +66,11 @@ def train(
 
     t_cfg = config["training"]
     m_cfg = config["model"]
-    d_cfg = config["data"]
+    ds_cfg = config["dataset"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = TemplateDataset(
-        input_size=m_cfg["input_size"],
-        num_classes=m_cfg["output_size"],
-    )
-    train_ds, val_ds, test_ds = split_dataset(
-        dataset,
-        d_cfg["train_ratio"],
-        d_cfg["val_ratio"],
-        d_cfg["test_ratio"],
-    )
+    train_ds, val_ds, test_ds = get_dataset(ds_cfg)
     train_loader, val_loader, _ = get_dataloaders(
         train_ds, val_ds, test_ds, t_cfg["batch_size"]
     )
@@ -119,12 +114,17 @@ def train(
     return model, history
 
 
-def sweep(configs: list[dict]) -> list[tuple[dict, nn.Module, list[dict]]]:
-    """Train one model per config, grouped as a single W&B sweep group."""
+def sweep(
+    model_configs: list[dict],
+    dataset_configs: list[dict],
+    base_config: dict,
+) -> list[tuple[dict, nn.Module, list[dict]]]:
+    """Train one model per (model_config × dataset_config), grouped as a single W&B sweep."""
     sweep_group = f"sweep_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     results = []
-    for config in configs:
-        config = {**config, "wandb_group": sweep_group}
-        model, history = train(config)
-        results.append((config, model, history))
+    for ds_cfg in dataset_configs:
+        for m_cfg in model_configs:
+            config = {**base_config, "model": m_cfg, "dataset": ds_cfg, "wandb_group": sweep_group}
+            model, history = train(config)
+            results.append((config, model, history))
     return results

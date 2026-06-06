@@ -8,11 +8,11 @@ This file is written for LLMs and code-generating tools. It describes the projec
 
 | File | Role |
 | --- | --- |
-| `src/configuration.toml` | All hyperparameters. `[[model]]` blocks define models to train. |
-| `src/datasets.py` | Dataset class + `split_dataset` + `get_dataloaders`. Replace the dataset class here. |
+| `src/configuration.toml` | All hyperparameters. `[[model]]` blocks define models; `[[dataset]]` blocks define datasets. |
+| `src/datasets.py` | Dataset classes + `_DATASET_REGISTRY` + `get_dataset` + `split_dataset` + `get_dataloaders`. |
 | `src/models.py` | Model classes. Add new architectures here. |
 | `src/eval.py` | `evaluate(model, dataloader, criterion, device) -> dict`. Runs validation. |
-| `src/train.py` | `train(config, callbacks)`, `sweep(configs)`, `_MODEL_REGISTRY`. |
+| `src/train.py` | `train(config, callbacks)`, `sweep(model_configs, dataset_configs, base_config)`, `_MODEL_REGISTRY`. |
 | `src/main.py` | CLI: `train`, `sweep`, `viewer`, `inference`. Do not modify unless adding a new command. |
 | `pyproject.toml` | Dependencies. Add libraries here (e.g. `torchvision`). |
 
@@ -22,30 +22,52 @@ This file is written for LLMs and code-generating tools. It describes the projec
 
 ### 1. Replace the dataset
 
-Edit `src/datasets.py`. Replace the `TemplateDataset` class. The new class must satisfy:
-
-- Inherits from `torch.utils.data.Dataset`
-- `__len__() -> int`
-- `__getitem__(idx) -> tuple[Tensor, Tensor]` — always a two-element tuple
-
-The second element is used as `targets` in the loss. For reconstruction tasks (autoencoder, VAE), return the same tensor twice: `return img, img`.
-
-Then update **one line** in `src/train.py` inside `train()`:
+Add a factory function to `src/datasets.py` and register it in `_DATASET_REGISTRY`. The factory signature is:
 
 ```python
-# Before (around line 61):
-dataset = TemplateDataset(
-    input_size=m_cfg["input_size"],
-    num_classes=m_cfg["output_size"],
-)
-
-# After:
-dataset = YourDataset()
+def get_your_datasets(config: dict) -> tuple[Dataset, Dataset, Dataset]:
+    """Return (train_ds, val_ds, test_ds)."""
 ```
 
-Also update the import at the top of `src/train.py` to import `YourDataset` instead of `TemplateDataset`.
+The `config` argument is the matching `[[dataset]]` block from `configuration.toml`.
 
-Do not touch `split_dataset`, `get_dataloaders`, or anything below the dataset line in `train()`.
+Each `Dataset.__getitem__` must return a two-element tuple:
+
+```python
+# For plain-tensor models (MLP, CNN):
+return input_tensor, label_tensor
+
+# For models requiring multiple named inputs (BERT, Transformer):
+return {"input_ids": ids_tensor, "attention_mask": mask_tensor}, label_tensor
+
+# For reconstruction tasks (autoencoder, VAE):
+return img_tensor, img_tensor
+```
+
+When `__getitem__` returns a dict as the first element, the training and evaluation loops automatically call `model(**inputs)` instead of `model(inputs)`. When `loss` is defined on the model, `inputs` passed to `model.loss(inputs, outputs, targets)` is also the dict (or tensor, respectively).
+
+**Step A** — Add the factory to `src/datasets.py`:
+
+```python
+def get_your_datasets(config: dict) -> tuple[Dataset, Dataset, Dataset]:
+    train_ds = ...
+    val_ds = ...
+    test_ds = ...
+    return train_ds, val_ds, test_ds
+
+_DATASET_REGISTRY["your_type"] = get_your_datasets
+```
+
+**Step B** — Add a `[[dataset]]` block to `src/configuration.toml`:
+
+```toml
+[[dataset]]
+name = "my_dataset"
+type = "your_type"
+# any extra keys are passed through to get_your_datasets via config
+```
+
+Do not touch `split_dataset`, `get_dataloaders`, or any file in `src/train.py` to add a dataset.
 
 ---
 
@@ -66,6 +88,13 @@ class YourModel(nn.Module):
 ```
 
 The `__init__` parameter names must exactly match the keys in the `[[model]]` config block (minus `type`).
+
+If the model requires multiple named inputs (e.g. `input_ids` and `attention_mask`), define `forward` with those exact keyword argument names — they are unpacked from the dict returned by `__getitem__`:
+
+```python
+def forward(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
+    ...
+```
 
 **Step B** — Register in `src/train.py`:
 
@@ -95,9 +124,9 @@ param2 = value2
 Follow the same three steps as above, but also implement a `loss` method on the model class:
 
 ```python
-def loss(self, inputs: Tensor, outputs: Any, targets: Tensor) -> Tensor:
+def loss(self, inputs, outputs, targets) -> Tensor:
     """
-    inputs  — the raw batch (same as what was passed to forward)
+    inputs  — raw batch input (Tensor or dict of Tensors, same as forward's input)
     outputs — whatever forward() returned (may be a tuple)
     targets — second element of dataset's __getitem__
     Returns a scalar tensor; .backward() is called on it.
@@ -111,10 +140,11 @@ When `loss` is defined on the model, the training and evaluation loops call it i
 ## What not to change
 
 - `split_dataset` and `get_dataloaders` signatures in `src/datasets.py`
-- `train()` and `sweep()` signatures in `src/train.py`
+- `get_dataset` dispatcher in `src/datasets.py` (add to `_DATASET_REGISTRY` instead)
+- `train()` signature in `src/train.py`
 - `_make_callbacks` in `src/main.py`
 - CLI command names: `train`, `sweep`, `viewer`, `inference`
-- Keys in `metrics.jsonl`: `epoch`, `train_loss`, `val_loss`, `timestamp`
+- Keys in `metrics.jsonl`: `epoch`, `train_loss`, `val_loss`, `dataset`, `timestamp`
 
 ---
 
@@ -128,6 +158,7 @@ When `loss` is defined on the model, the training and evaluation loops call it i
 cookiecutter https://github.com/your-org/mltemplate
 # project_name: MNIST VAE
 # project_slug: mnist_vae
+# starting_point: template
 cd mnist_vae
 uv pip install -e .
 ```
@@ -152,67 +183,52 @@ Re-install: `uv pip install -e .`
 
 ### Step 3 — `src/configuration.toml`
 
-Replace the `[[model]]` block (remove all existing `[[model]]` entries and add):
+Replace the `[[model]]` block and the `[[dataset]]` blocks:
 
 ```toml
 [[model]]
 type = "vae"
 input_size = 784
 latent_dim = 20
+
+[[dataset]]
+name = "mnist"
+type = "mnist_flat"
 ```
 
 ### Step 4 — `src/datasets.py`
 
-Replace the `TemplateDataset` class with:
+Add a factory function after the existing code:
 
 ```python
-class MNISTDataset(Dataset):
-    def __init__(self, root: str = ".", train: bool = True):
-        from torchvision import datasets, transforms
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x.flatten()),
-        ])
-        self.data = datasets.MNIST(root, train=train, download=True, transform=transform)
+def get_mnist_flat_datasets(config: dict) -> tuple[Dataset, Dataset, Dataset]:
+    from torchvision import datasets, transforms
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Lambda(lambda x: x.flatten()),
+    ])
 
-    def __len__(self) -> int:
-        return len(self.data)
+    class _MNISTWrap(Dataset):
+        def __init__(self, tv_dataset):
+            self.ds = tv_dataset
+        def __len__(self):
+            return len(self.ds)
+        def __getitem__(self, idx):
+            img, _ = self.ds[idx]
+            return img, img  # reconstruction target = input
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        img, _ = self.data[idx]
-        return img, img  # reconstruction target = input
+    train_raw = datasets.MNIST(".", train=True, download=True, transform=transform)
+    test_raw  = datasets.MNIST(".", train=False, download=True, transform=transform)
+    train_full = _MNISTWrap(train_raw)
+    train_ds, val_ds = random_split(train_full, [50000, 10000])
+    return train_ds, val_ds, _MNISTWrap(test_raw)
+
+_DATASET_REGISTRY["mnist_flat"] = get_mnist_flat_datasets
 ```
-
-Keep `split_dataset` and `get_dataloaders` unchanged.
 
 ### Step 5 — `src/train.py`
 
-Two changes:
-
-**Change 1** — update the import at the top:
-
-```python
-# Before:
-from src.datasets import TemplateDataset, get_dataloaders, split_dataset
-
-# After:
-from src.datasets import MNISTDataset, get_dataloaders, split_dataset
-```
-
-**Change 2** — update the dataset line inside `train()`:
-
-```python
-# Before:
-dataset = TemplateDataset(
-    input_size=m_cfg["input_size"],
-    num_classes=m_cfg["output_size"],
-)
-
-# After:
-dataset = MNISTDataset()
-```
-
-**Change 3** — add `VAE` to `_MODEL_REGISTRY`:
+Add `VAE` to `_MODEL_REGISTRY`:
 
 ```python
 from src.models import SimpleCNN, TemplateModel, VAE
@@ -257,12 +273,7 @@ class VAE(nn.Module):
         z = mu + std * torch.randn_like(std)
         return self.decoder(z), mu, logvar
 
-    def loss(
-        self,
-        inputs: torch.Tensor,
-        outputs: tuple,
-        targets: torch.Tensor,
-    ) -> torch.Tensor:
+    def loss(self, inputs, outputs, targets) -> torch.Tensor:
         recon, mu, logvar = outputs
         recon_loss = F.binary_cross_entropy(recon, targets, reduction="sum")
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
@@ -276,7 +287,7 @@ mnist_vae train
 mnist_vae viewer logs/mnist_vae_log/<timestamp>/
 ```
 
-Expected: ELBO loss decreases over epochs. The training curve is saved to `training_curve.png`.
+Expected: ELBO loss decreases over epochs. The training curve is saved to `training_curve.png` with the title "Training curve — mnist".
 
 ### Inference note
 

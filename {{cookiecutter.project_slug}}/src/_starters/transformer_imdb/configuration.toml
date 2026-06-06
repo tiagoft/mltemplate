@@ -1,0 +1,22 @@
+[training]
+batch_size = 32
+num_epochs = 10
+learning_rate = 1e-4
+checkpoint_every_n_epochs = 2
+log_directory = "logs"
+
+[[model]]
+type = "transformer"
+vocab_size = 20000
+d_model = 128
+nhead = 4
+num_layers = 2
+max_seq_len = 256
+num_classes = 2
+dropout = 0.1
+
+[[dataset]]
+name = "imdb"
+type = "imdb"
+max_seq_len = 256
+vocab_size = 20000

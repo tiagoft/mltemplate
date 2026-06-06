@@ -1,0 +1,25 @@
+[training]
+batch_size = 8
+num_epochs = 3
+learning_rate = 2e-5
+checkpoint_every_n_epochs = 1
+log_directory = "logs"
+
+[[model]]
+type = "bert_chunks"
+bert_model_name = "bert-base-uncased"
+max_chunks = 4
+chunk_size = 128
+d_model = 768
+nhead = 8
+num_layers = 2
+num_classes = 2
+dropout = 0.1
+
+[[dataset]]
+name = "imdb_chunks"
+type = "bert_chunks_imdb"
+bert_model_name = "bert-base-uncased"
+chunk_size = 128
+chunk_overlap = 32
+max_chunks = 4

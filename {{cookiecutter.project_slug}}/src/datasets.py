@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 
@@ -48,3 +50,26 @@ def get_dataloaders(
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0)
     return train_loader, val_loader, test_loader
+
+
+def get_template_datasets(config: dict) -> tuple[Dataset, Dataset, Dataset]:
+    """Factory for TemplateDataset. config is one [[dataset]] block."""
+    dataset = TemplateDataset(
+        size=config.get("size", 1000),
+        input_size=config.get("input_size", 128),
+        num_classes=config.get("num_classes", 10),
+    )
+    return split_dataset(dataset, config["train_ratio"], config["val_ratio"], config["test_ratio"])
+
+
+_DATASET_REGISTRY: dict[str, Callable[[dict], tuple[Dataset, Dataset, Dataset]]] = {
+    "template": get_template_datasets,
+}
+
+
+def get_dataset(config: dict) -> tuple[Dataset, Dataset, Dataset]:
+    """Dispatch to the correct factory based on config['type']."""
+    ds_type = config.get("type", "template")
+    if ds_type not in _DATASET_REGISTRY:
+        raise ValueError(f"Unknown dataset type: {ds_type!r}. Available: {list(_DATASET_REGISTRY)}")
+    return _DATASET_REGISTRY[ds_type](config)

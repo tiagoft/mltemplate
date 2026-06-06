@@ -1,0 +1,19 @@
+[training]
+batch_size = 64
+num_epochs = 20
+learning_rate = 1e-3
+checkpoint_every_n_epochs = 5
+log_directory = "logs"
+
+[[model]]
+type = "audio_cnn"
+channels = [32, 64]
+output_size = 10
+dropout = 0.2
+
+[[dataset]]
+name = "spoken_digits"
+type = "audio"
+n_mels = 64
+time_frames = 128
+sample_rate = 16000

@@ -1,0 +1,16 @@
+[training]
+batch_size = 64
+num_epochs = 10
+learning_rate = 1e-3
+checkpoint_every_n_epochs = 2
+log_directory = "logs"
+
+[[model]]
+type = "mnist_cnn"
+channels = [32, 64]
+output_size = 10
+dropout = 0.2
+
+[[dataset]]
+name = "mnist"
+type = "mnist"

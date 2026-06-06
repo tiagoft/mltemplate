@@ -14,9 +14,13 @@ def evaluate(
     total_loss = 0.0
     n_batches = 0
     with torch.no_grad():
-        for inputs, targets in dataloader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
+        for batch in dataloader:
+            if isinstance(batch[0], dict):
+                inputs = {k: v.to(device) for k, v in batch[0].items()}
+            else:
+                inputs = batch[0].to(device)
+            targets = batch[1].to(device)
+            outputs = model(**inputs) if isinstance(inputs, dict) else model(inputs)
             if hasattr(model, "loss"):
                 loss = model.loss(inputs, outputs, targets)
             else:

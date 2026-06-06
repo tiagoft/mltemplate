@@ -30,8 +30,25 @@ dropout = 0.2
 # output_size = 10
 # dropout = 0.2
 
-[data]
-# train_ratio + val_ratio + test_ratio must sum to 1.0
+# One [[dataset]] entry → used by `train`.
+# Multiple [[dataset]] entries → used by `sweep` (cross-product with [[model]] entries).
+
+[[dataset]]
+name = "small"
+type = "template"
+size = 500
+input_size = 128
+num_classes = 10
+train_ratio = 0.7
+val_ratio = 0.15
+test_ratio = 0.15
+
+[[dataset]]
+name = "large"
+type = "template"
+size = 2000
+input_size = 128
+num_classes = 10
 train_ratio = 0.7
 val_ratio = 0.15
 test_ratio = 0.15

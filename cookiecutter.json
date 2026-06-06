@@ -4,5 +4,6 @@
   "author_name": "Your Name",
   "author_email": "you@example.com",
   "python_version": "3.13",
-  "wandb_project": "{{ cookiecutter.project_slug }}_experiments"
+  "wandb_project": "{{ cookiecutter.project_slug }}_experiments",
+  "starting_point": ["template", "cnn_mnist", "transformer_imdb", "bert_imdb", "bert_chunks_imdb", "audio_cnn"]
 }

@@ -13,6 +13,16 @@ dependencies = [
     "typer[all]",
     "rich",
     "matplotlib",
+{%- if cookiecutter.starting_point == "cnn_mnist" %}
+    "torchvision",
+{%- elif cookiecutter.starting_point == "transformer_imdb" %}
+    "datasets",
+{%- elif cookiecutter.starting_point in ["bert_imdb", "bert_chunks_imdb"] %}
+    "transformers",
+    "datasets",
+{%- elif cookiecutter.starting_point == "audio_cnn" %}
+    "torchaudio",
+{%- endif %}
 ]
 
 [project.scripts]

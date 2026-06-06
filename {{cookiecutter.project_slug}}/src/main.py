@@ -24,7 +24,7 @@ def _load_config(config_file: Path) -> dict:
         return tomllib.load(f)
 
 
-def _make_callbacks(run_dir: Path, checkpoint_every: int):
+def _make_callbacks(run_dir: Path, checkpoint_every: int, dataset_name: str = ""):
     metrics_path = run_dir / "metrics.jsonl"
 
     def metrics_callback(epoch: int, train_loss: float, val_metrics: dict, model) -> None:
@@ -32,6 +32,7 @@ def _make_callbacks(run_dir: Path, checkpoint_every: int):
             "epoch": epoch,
             "train_loss": train_loss,
             **{f"val_{k}": v for k, v in val_metrics.items()},
+            "dataset": dataset_name,
             "timestamp": datetime.now().isoformat(),
         }
         with open(metrics_path, "a") as f:
@@ -53,7 +54,7 @@ def train(
 ) -> None:
     """Train the model and save checkpoints + metrics to a timestamped run directory."""
     config = _load_config(config_file)
-    config = {**config, "model": config["model"][0]}
+    config = {**config, "model": config["model"][0], "dataset": config["dataset"][0]}
     t_cfg = config["training"]
 
     run_dir = (
@@ -66,7 +67,8 @@ def train(
 
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
 
-    train_model(config, callbacks=_make_callbacks(run_dir, t_cfg["checkpoint_every_n_epochs"]))
+    dataset_name = config["dataset"].get("name", "")
+    train_model(config, callbacks=_make_callbacks(run_dir, t_cfg["checkpoint_every_n_epochs"], dataset_name))
     console.print("[green]Training complete.[/green]")
 
 
@@ -86,19 +88,27 @@ def viewer(
 
         table = Table(title=f"Runs in {log_dir}")
         table.add_column("Run", style="cyan")
+        table.add_column("Dataset", style="yellow")
         table.add_column("Epochs", justify="right")
         table.add_column("Final val_loss", justify="right")
 
         for metrics_file in sorted(log_dir.rglob("metrics.jsonl")):
             run_name = str(metrics_file.parent.relative_to(log_dir))
             lines = metrics_file.read_text().strip().splitlines()
+
+            dataset_name = "—"
+            config_json = metrics_file.parent / "config.json"
+            if config_json.exists():
+                run_cfg = json.loads(config_json.read_text())
+                dataset_name = run_cfg.get("dataset", {}).get("name", "—")
+
             if not lines:
-                table.add_row(run_name, "0", "—")
+                table.add_row(run_name, dataset_name, "0", "—")
                 continue
             last = json.loads(lines[-1])
             val_loss = last.get("val_loss", "—")
             val_loss_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else str(val_loss)
-            table.add_row(run_name, str(len(lines)), val_loss_str)
+            table.add_row(run_name, dataset_name, str(len(lines)), val_loss_str)
 
         console.print(table)
         return
@@ -112,6 +122,12 @@ def viewer(
         console.print(f"[red]{metrics_file} not found.[/red]")
         raise typer.Exit(1)
 
+    dataset_name = ""
+    config_json = run_dir / "config.json"
+    if config_json.exists():
+        run_cfg = json.loads(config_json.read_text())
+        dataset_name = run_cfg.get("dataset", {}).get("name", "")
+
     records = [json.loads(line) for line in metrics_file.read_text().strip().splitlines()]
     epochs = [r["epoch"] for r in records]
     train_losses = [r["train_loss"] for r in records]
@@ -123,7 +139,8 @@ def viewer(
         ax.plot(epochs, val_losses, label="val loss")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title("Training curve")
+    title = "Training curve" + (f" — {dataset_name}" if dataset_name else "")
+    ax.set_title(title)
     ax.legend()
 
     out_path = run_dir / "training_curve.png"
@@ -136,45 +153,51 @@ def viewer(
 def sweep(
     config_file: Annotated[Path, typer.Option(help="Path to configuration.toml")] = _DEFAULT_CONFIG,
 ) -> None:
-    """Train all [[model]] entries defined in configuration.toml."""
+    """Train all [[model]] × [[dataset]] combinations defined in configuration.toml."""
     config = _load_config(config_file)
     model_list = config["model"]
-    if len(model_list) < 2:
-        console.print("[yellow]Only one [[model]] entry found — use [bold]train[/bold] for a single run.[/yellow]")
-        console.print("Add more [[model]] blocks to configuration.toml to define sweep variants.")
+    dataset_list = config["dataset"]
+    combos = [(ds, m) for ds in dataset_list for m in model_list]
+
+    if len(combos) < 2:
+        console.print(
+            "[yellow]Only one combination found — use [bold]train[/bold] for a single run.[/yellow]"
+        )
+        console.print("Add more [[model]] or [[dataset]] blocks to configuration.toml to define sweep variants.")
         raise typer.Exit(1)
 
     sweep_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     sweep_group = f"sweep_{sweep_ts}"
     sweep_dir = Path(config["training"]["log_directory"]) / _LOG_SUBDIR / sweep_group
-    console.print(f"Sweep directory: [bold]{sweep_dir}[/bold]  ({len(model_list)} variants)\n")
+    console.print(f"Sweep directory: [bold]{sweep_dir}[/bold]  ({len(combos)} variants)\n")
 
     results = []
-    for i, model_cfg in enumerate(model_list):
-        run_cfg = {**config, "model": model_cfg, "wandb_group": sweep_group}
+    for i, (ds_cfg, m_cfg) in enumerate(combos):
+        run_cfg = {**config, "model": m_cfg, "dataset": ds_cfg, "wandb_group": sweep_group}
 
         run_dir = sweep_dir / f"v{i:02d}"
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "config.json").write_text(json.dumps(run_cfg, indent=2))
 
-        m = model_cfg
-        label = f"{m.get('type', 'mlp')} {m.get('hidden_sizes') or m.get('channels', '')}"
+        label = f"{ds_cfg.get('name', '?')} / {m_cfg.get('type', 'mlp')}"
         console.print(f"[bold cyan]Variant v{i:02d}[/bold cyan]: {label}")
 
+        dataset_name = ds_cfg.get("name", "")
         model, history = train_model(
             run_cfg,
-            callbacks=_make_callbacks(run_dir, run_cfg["training"]["checkpoint_every_n_epochs"]),
+            callbacks=_make_callbacks(run_dir, run_cfg["training"]["checkpoint_every_n_epochs"], dataset_name),
         )
-        results.append((label, history))
+        results.append((label, ds_cfg.get("name", ""), m_cfg.get("type", "mlp"), history))
         console.print()
 
     table = Table(title=f"Sweep results: {sweep_group}")
     table.add_column("Variant", style="cyan")
+    table.add_column("Dataset", style="yellow")
     table.add_column("Model", style="magenta")
     table.add_column("Final val_loss", justify="right")
-    for i, (label, history) in enumerate(results):
+    for i, (label, ds_name, model_type, history) in enumerate(results):
         val_loss = history[-1].get("val_loss", float("nan"))
-        table.add_row(f"v{i:02d}", label, f"{val_loss:.4f}")
+        table.add_row(f"v{i:02d}", ds_name, model_type, f"{val_loss:.4f}")
     console.print(table)
     console.print(f"\nView curves: [bold]{sweep_group}/v<N>/[/bold] or run [bold]viewer --list[/bold]")
 
