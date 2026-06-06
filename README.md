@@ -7,23 +7,27 @@ A [cookiecutter](https://cookiecutter.readthedocs.io) template for PyTorch machi
 ## Quickstart
 
 **Install cookiecutter** (once):
+
 ```bash
 uv tool install cookiecutter
 ```
 
 **Generate a new project:**
+
 ```bash
 cookiecutter https://github.com/your-org/mltemplate
 ```
 
 Or, from a local clone:
+
 ```bash
 git clone https://github.com/your-org/mltemplate
 cookiecutter mltemplate/
 ```
 
 You will be prompted for a few values:
-```
+
+```text
 project_name [My ML Project]: MNIST Classifier
 project_slug [my_ml_project]: mnist_classifier
 author_name [Your Name]: Ada Lovelace
@@ -32,7 +36,8 @@ python_version [3.13]:
 ```
 
 This creates the directory `mnist_classifier/` with the following structure:
-```
+
+```text
 mnist_classifier/
 ├── pyproject.toml
 └── src/
@@ -46,18 +51,21 @@ mnist_classifier/
 ```
 
 **Install and explore the CLI:**
+
 ```bash
 cd mnist_classifier
 uv pip install -e .
 mnist_classifier --help
 ```
-```
+
+```text
 Usage: mnist_classifier [OPTIONS] COMMAND [ARGS]...
 
   MNIST Classifier CLI
 
 Commands:
   train      Train the model and save checkpoints + metrics.
+  sweep      Train all [[model]] entries defined in configuration.toml.
   viewer     Plot training curves, or list all logged runs.
   inference  Run inference on a single input using a trained checkpoint.
 ```
@@ -69,10 +77,12 @@ Commands:
 The generated project ships with a `TemplateDataset` that produces random tensors — useful for verifying the full pipeline works before you swap in real data.
 
 **Train:**
+
 ```bash
 mnist_classifier train
 ```
-```
+
+```text
 Run directory: logs/mnist_classifier_log/20240601_143022
 Epochs: 100%|████████████| 10/10 [00:12<00:00]
   Saved checkpoint: checkpoint_epoch_2.pth
@@ -84,16 +94,19 @@ Training complete.
 Checkpoints (`.pth`) and a `metrics.jsonl` file are written to the timestamped run directory. A `config.json` snapshot is also saved there so you can always reproduce the run.
 
 **Plot the training curve:**
+
 ```bash
 mnist_classifier viewer logs/mnist_classifier_log/20240601_143022/
 # Saved: logs/mnist_classifier_log/20240601_143022/training_curve.png
 ```
 
 **List all logged runs:**
+
 ```bash
 mnist_classifier viewer --list
 ```
-```
+
+```text
               Runs in logs/mnist_classifier_log
 ┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━┓
 ┃ Run                 ┃ Epochs ┃ Final val_loss ┃
@@ -111,6 +124,7 @@ This section walks through replacing the placeholder code with a real task: clas
 ### Step 1 — Add torchvision
 
 In `pyproject.toml`, add `"torchvision"` to `dependencies`:
+
 ```toml
 dependencies = [
     "torch",
@@ -131,7 +145,7 @@ learning_rate = 1e-3
 checkpoint_every_n_epochs = 2
 log_directory = "logs"
 
-[model]
+[[model]]
 type = "mlp"
 input_size = 784        # 28 × 28 pixels, flattened
 hidden_sizes = []       # empty = single linear layer (784 → 10)
@@ -173,7 +187,6 @@ class MNISTDataset(Dataset):
 
 
 def split_dataset(dataset, train_ratio, val_ratio, test_ratio):
-    from torch.utils.data import random_split
     n = len(dataset)
     n_train = int(n * train_ratio)
     n_val = int(n * val_ratio)
@@ -182,7 +195,7 @@ def split_dataset(dataset, train_ratio, val_ratio, test_ratio):
 
 
 def get_dataloaders(train_ds, val_ds, test_ds, batch_size):
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=0)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=0)
     return train_loader, val_loader, test_loader
@@ -235,21 +248,13 @@ idx = 42
 img, true_label = mnist[idx]
 input_str = ",".join(f"{v:.6f}" for v in img.tolist())
 print(f"True label: {true_label}")
-print(f"Input string (first 20 values): {','.join(input_str.split(',')[:20])}...")
 ```
 
-Run it:
-```bash
-python prepare_input.py
-# True label: 9
-# Input string (first 20 values): 0.000000,0.000000,...
-```
+Run it, capture the input string, then pass it to inference:
 
-Then run inference:
 ```bash
 INPUT=$(python -c "
 from torchvision import datasets, transforms
-import torch
 mnist = datasets.MNIST('.', train=False, download=True,
     transform=transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.flatten())]))
 img, _ = mnist[42]
@@ -257,7 +262,10 @@ print(','.join(f'{v:.6f}' for v in img.tolist()))
 ")
 
 mnist_classifier inference logs/mnist_classifier_log/20240601_143022/checkpoint_epoch_10.pth "$INPUT"
-# → [-3.12, -1.45, 0.23, -2.1, -0.87, -1.32, -3.54, -0.45, -0.98, 4.21]
+```
+
+```text
+[-3.12, -1.45, 0.23, -2.1, -0.87, -1.32, -3.54, -0.45, -0.98, 4.21]
 ```
 
 The output is 10 raw logits (one per digit class). The predicted digit is the index of the largest value:
@@ -272,16 +280,34 @@ print(f"Predicted: {logits.argmax().item()}")  # → 9
 
 ## Sweep
 
-Configure variants directly in `src/configuration.toml`. Each variant is a **partial override** — only specify what changes; everything else inherits from the base config above.
+Add multiple `[[model]]` blocks to `src/configuration.toml` — one per architecture to compare. No separate sweep section needed.
 
 ```toml
-[sweep]
-variants = [
-    {model = {hidden_sizes = [128]}},
-    {model = {hidden_sizes = [256, 128]}},
-    {model = {type = "cnn", channels = [16, 32]}},
-    {model = {type = "cnn", channels = [32, 64]}},
-]
+[[model]]
+type = "mlp"
+input_size = 784
+hidden_sizes = [128]
+output_size = 10
+dropout = 0.1
+
+[[model]]
+type = "mlp"
+input_size = 784
+hidden_sizes = [256, 128]
+output_size = 10
+dropout = 0.2
+
+[[model]]
+type = "cnn"
+channels = [16, 32]
+output_size = 10
+dropout = 0.1
+
+[[model]]
+type = "cnn"
+channels = [32, 64]
+output_size = 10
+dropout = 0.2
 ```
 
 Then run:
@@ -316,7 +342,7 @@ Epochs: 100%|████████| 10/10 ...
 └─────────┴────────────────┴────────────────┘
 ```
 
-Each variant saves its own checkpoints and `metrics.jsonl` under `sweep_<timestamp>/v0N/`. List them all:
+Each variant saves its own checkpoints and `metrics.jsonl` under `sweep_<timestamp>/v0N/`. List them all with:
 
 ```bash
 mnist_classifier viewer --list
@@ -343,6 +369,7 @@ mnist_classifier viewer logs/mnist_classifier_log/sweep_20240601_150312/v03/
 
 > **Note for CNN input shape:** `SimpleCNN` expects `(B, 1, H, W)` tensors.
 > Update `MNISTDataset` to omit the flatten transform when training CNNs:
+>
 > ```python
 > transform = transforms.ToTensor()  # keeps (1, 28, 28) shape
 > ```
@@ -357,11 +384,7 @@ W&B logging is off by default. To enable it, uncomment one line in `src/configur
 
 ```toml
 [training]
-batch_size = 64
-num_epochs = 10
-learning_rate = 1e-3
-checkpoint_every_n_epochs = 2
-log_directory = "logs"
+...
 wandb_project = "mnist_classifier_experiments"  # ← uncomment this line
 ```
 
@@ -372,8 +395,9 @@ mnist_classifier train
 ```
 
 W&B will print a run URL:
-```
+
+```text
 wandb: Logging to https://wandb.ai/your-name/mnist_classifier_experiments/runs/abc123
 ```
 
-**For sweeps:** no extra configuration needed. `sweep()` automatically groups all configs under a shared run group, which appears as a single experiment in the W&B UI where you can compare learning curves, hyperparameters, and final metrics side by side.
+**For sweeps:** no extra configuration needed. `sweep` automatically groups all variants under a shared run group, which appears as a single experiment in the W&B UI where you can compare learning curves, hyperparameters, and final metrics side by side.

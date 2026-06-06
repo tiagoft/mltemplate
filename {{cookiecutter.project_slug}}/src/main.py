@@ -10,8 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from src.models import TemplateModel
-from src.train import train as train_model
+from src.train import _MODEL_REGISTRY, train as train_model
 
 app = typer.Typer(help="{{ cookiecutter.project_name }} CLI")
 console = Console()
@@ -23,17 +22,6 @@ _LOG_SUBDIR = "{{ cookiecutter.project_slug }}_log"
 def _load_config(config_file: Path) -> dict:
     with open(config_file, "rb") as f:
         return tomllib.load(f)
-
-
-def _merge_config(base: dict, override: dict) -> dict:
-    """Apply a partial override onto base. Dicts are merged one level deep."""
-    merged = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = {**merged[key], **value}
-        else:
-            merged[key] = value
-    return merged
 
 
 def _make_callbacks(run_dir: Path, checkpoint_every: int):
@@ -65,6 +53,7 @@ def train(
 ) -> None:
     """Train the model and save checkpoints + metrics to a timestamped run directory."""
     config = _load_config(config_file)
+    config = {**config, "model": config["model"][0]}
     t_cfg = config["training"]
 
     run_dir = (
@@ -147,35 +136,34 @@ def viewer(
 def sweep(
     config_file: Annotated[Path, typer.Option(help="Path to configuration.toml")] = _DEFAULT_CONFIG,
 ) -> None:
-    """Train all sweep variants defined in configuration.toml [sweep.variants]."""
+    """Train all [[model]] entries defined in configuration.toml."""
     config = _load_config(config_file)
-    variants = config.get("sweep", {}).get("variants", [])
-    if not variants:
-        console.print("[red]No [sweep] variants defined in configuration.toml.[/red]")
-        console.print("Add a [sweep] section — see the comments at the bottom of the file.")
+    model_list = config["model"]
+    if len(model_list) < 2:
+        console.print("[yellow]Only one [[model]] entry found — use [bold]train[/bold] for a single run.[/yellow]")
+        console.print("Add more [[model]] blocks to configuration.toml to define sweep variants.")
         raise typer.Exit(1)
 
     sweep_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     sweep_group = f"sweep_{sweep_ts}"
     sweep_dir = Path(config["training"]["log_directory"]) / _LOG_SUBDIR / sweep_group
-    console.print(f"Sweep directory: [bold]{sweep_dir}[/bold]  ({len(variants)} variants)\n")
+    console.print(f"Sweep directory: [bold]{sweep_dir}[/bold]  ({len(model_list)} variants)\n")
 
     results = []
-    for i, variant in enumerate(variants):
-        merged = _merge_config(config, variant)
-        merged["wandb_group"] = sweep_group
+    for i, model_cfg in enumerate(model_list):
+        run_cfg = {**config, "model": model_cfg, "wandb_group": sweep_group}
 
         run_dir = sweep_dir / f"v{i:02d}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "config.json").write_text(json.dumps(merged, indent=2))
+        (run_dir / "config.json").write_text(json.dumps(run_cfg, indent=2))
 
-        m = merged["model"]
+        m = model_cfg
         label = f"{m.get('type', 'mlp')} {m.get('hidden_sizes') or m.get('channels', '')}"
         console.print(f"[bold cyan]Variant v{i:02d}[/bold cyan]: {label}")
 
         model, history = train_model(
-            merged,
-            callbacks=_make_callbacks(run_dir, merged["training"]["checkpoint_every_n_epochs"]),
+            run_cfg,
+            callbacks=_make_callbacks(run_dir, run_cfg["training"]["checkpoint_every_n_epochs"]),
         )
         results.append((label, history))
         console.print()
@@ -199,7 +187,9 @@ def inference(
 ) -> None:
     """Run inference on a single input using a trained checkpoint."""
     config = _load_config(config_file)
-    model = TemplateModel(**config["model"])
+    m_cfg = config["model"][0]
+    model_cls = _MODEL_REGISTRY[m_cfg.get("type", "mlp")]
+    model = model_cls(**{k: v for k, v in m_cfg.items() if k != "type"})
     model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
     model.eval()
 

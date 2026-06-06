@@ -7,27 +7,31 @@ log_directory = "logs"
 # Uncomment to enable Weights & Biases logging:
 # wandb_project = "{{ cookiecutter.project_slug }}_experiments"
 
-[model]
+# One [[model]] entry → used by `train`.
+# Multiple [[model]] entries → used by `sweep` (one run per entry).
+
+[[model]]
 type = "mlp"
 input_size = 128
 hidden_sizes = [256, 128]
 output_size = 10
 dropout = 0.2
 
+# [[model]]
+# type = "mlp"
+# input_size = 128
+# hidden_sizes = [512, 256, 128]
+# output_size = 10
+# dropout = 0.3
+
+# [[model]]
+# type = "cnn"
+# channels = [32, 64]
+# output_size = 10
+# dropout = 0.2
+
 [data]
 # train_ratio + val_ratio + test_ratio must sum to 1.0
 train_ratio = 0.7
 val_ratio = 0.15
 test_ratio = 0.15
-
-# [sweep]
-# Each variant is a partial override applied on top of the sections above.
-# Only specify what changes — everything else inherits from the base config.
-# Run with: <project_slug> sweep
-#
-# variants = [
-#     {model = {hidden_sizes = [128]}},
-#     {model = {hidden_sizes = [256, 128]}},
-#     {model = {type = "cnn", channels = [16, 32]}},
-#     {model = {type = "cnn", channels = [32, 64]}},
-# ]
