@@ -14,7 +14,12 @@ class _NoOpRun:
 
 from src.datasets import TemplateDataset, get_dataloaders, split_dataset
 from src.eval import evaluate
-from src.models import TemplateModel
+from src.models import SimpleCNN, TemplateModel
+
+_MODEL_REGISTRY: dict[str, type[nn.Module]] = {
+    "mlp": TemplateModel,
+    "cnn": SimpleCNN,
+}
 
 
 def train_epoch(
@@ -72,7 +77,10 @@ def train(
         train_ds, val_ds, test_ds, t_cfg["batch_size"]
     )
 
-    model = TemplateModel(**m_cfg).to(device)
+    model_type = m_cfg.get("type", "mlp")
+    model_cls = _MODEL_REGISTRY[model_type]
+    model_kwargs = {k: v for k, v in m_cfg.items() if k != "type"}
+    model = model_cls(**model_kwargs).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=t_cfg["learning_rate"])
     criterion = nn.CrossEntropyLoss()
 

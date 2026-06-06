@@ -8,6 +8,7 @@ log_directory = "logs"
 # wandb_project = "{{ cookiecutter.project_slug }}_experiments"
 
 [model]
+type = "mlp"
 input_size = 128
 hidden_sizes = [256, 128]
 output_size = 10
