@@ -91,6 +91,7 @@ def viewer(
         table.add_column("Dataset", style="yellow")
         table.add_column("Epochs", justify="right")
         table.add_column("Final val_loss", justify="right")
+        table.add_column("Final val_f1", justify="right")
 
         for metrics_file in sorted(log_dir.rglob("metrics.jsonl")):
             run_name = str(metrics_file.parent.relative_to(log_dir))
@@ -103,12 +104,14 @@ def viewer(
                 dataset_name = run_cfg.get("dataset", {}).get("name", "—")
 
             if not lines:
-                table.add_row(run_name, dataset_name, "0", "—")
+                table.add_row(run_name, dataset_name, "0", "—", "—")
                 continue
             last = json.loads(lines[-1])
             val_loss = last.get("val_loss", "—")
             val_loss_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else str(val_loss)
-            table.add_row(run_name, dataset_name, str(len(lines)), val_loss_str)
+            val_f1 = last.get("val_f1", "—")
+            val_f1_str = f"{val_f1:.4f}" if isinstance(val_f1, float) else str(val_f1)
+            table.add_row(run_name, dataset_name, str(len(lines)), val_loss_str, val_f1_str)
 
         console.print(table)
         return
@@ -132,16 +135,27 @@ def viewer(
     epochs = [r["epoch"] for r in records]
     train_losses = [r["train_loss"] for r in records]
     val_losses = [r.get("val_loss") for r in records]
+    val_f1s = [r.get("val_f1") for r in records]
 
     fig, ax = plt.subplots()
-    ax.plot(epochs, train_losses, label="train loss")
+    ax.plot(epochs, train_losses, label="train loss", color="tab:blue")
     if any(v is not None for v in val_losses):
-        ax.plot(epochs, val_losses, label="val loss")
+        ax.plot(epochs, val_losses, label="val loss", color="tab:orange")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     title = "Training curve" + (f" — {dataset_name}" if dataset_name else "")
     ax.set_title(title)
-    ax.legend()
+
+    if any(v is not None for v in val_f1s):
+        ax2 = ax.twinx()
+        ax2.plot(epochs, val_f1s, label="val F1", color="tab:green", linestyle="--")
+        ax2.set_ylabel("F1")
+        ax2.set_ylim(0, 1)
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc="center right")
+    else:
+        ax.legend()
 
     out_path = run_dir / "training_curve.png"
     fig.savefig(out_path, dpi=150)
@@ -195,9 +209,11 @@ def sweep(
     table.add_column("Dataset", style="yellow")
     table.add_column("Model", style="magenta")
     table.add_column("Final val_loss", justify="right")
+    table.add_column("Final val_f1", justify="right")
     for i, (label, ds_name, model_type, history) in enumerate(results):
         val_loss = history[-1].get("val_loss", float("nan"))
-        table.add_row(f"v{i:02d}", ds_name, model_type, f"{val_loss:.4f}")
+        val_f1 = history[-1].get("val_f1", float("nan"))
+        table.add_row(f"v{i:02d}", ds_name, model_type, f"{val_loss:.4f}", f"{val_f1:.4f}")
     console.print(table)
     console.print(f"\nView curves: [bold]{sweep_group}/v<N>/[/bold] or run [bold]viewer --list[/bold]")
 
